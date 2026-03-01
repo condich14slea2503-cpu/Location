@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Cross Street</title>
+  <style>
+    :root { color-scheme: dark light; }
+    body { margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { padding: 16px; max-width: 860px; margin: 0 auto; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 12px; }
+    h1 { margin:0; font-size: 18px; opacity: 0.9; letter-spacing: 0.2px; }
+    .status { font-size: 13px; opacity: 0.75; text-align:right; }
+
+    .big {
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(127,127,127,0.14);
+      border: 1px solid rgba(127,127,127,0.20);
+    }
+
+    .cross {
+      font-size: 44px;
+      line-height: 1.05;
+      font-weight: 900;
+      letter-spacing: 0.2px;
+      word-break: break-word;
+      margin: 0 0 10px 0;
+    }
+
+    .street {
+      font-size: 18px;
+      line-height: 1.25;
+      font-weight: 650;
+      opacity: 0.9;
+      margin: 0 0 10px 0;
+      word-break: break-word;
+    }
+
+    .meta {
+      display:flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      opacity: 0.75;
+      font-size: 13px;
+    }
+
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .btnrow { display:flex; gap: 10px; margin-top: 12px; }
+    button {
+      flex: 1;
+      padding: 14px 14px;
+      border-radius: 16px;
+      border: 0;
+      font-size: 16px;
+      font-weight: 850;
+      background: #0A84FF;
+      color: white;
+    }
+    button.secondary { background: rgba(127,127,127,0.25); color: white; }
+    button:active { transform: scale(0.99); }
+    button:disabled { opacity: 0.6; }
+
+    .footer {
+      margin-top: 12px;
+      font-size: 12px;
+      opacity: 0.7;
+      line-height: 1.35;
+    }
+
+    .pill {
+      display:inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(127,127,127,0.18);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h1>Nearest Cross Street</h1>
+      <div class="status" id="status">Opening…</div>
+    </div>
+
+    <div class="big" role="status" aria-live="polite">
+      <div class="cross" id="cross">Locating…</div>
+      <div class="street" id="street">—</div>
+
+      <div class="meta">
+        <span class="pill">Coords</span>
+        <span class="mono" id="coords">—</span>
+        <span class="pill">Accuracy</span>
+        <span class="mono" id="acc">—</span>
+      </div>
+
+      <div class="btnrow">
+        <button id="refresh">Refresh</button>
+        <button class="secondary" id="copy">Copy</button>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="pill">Data</span>
+      © OpenStreetMap contributors (ODbL). Queries Overpass API for nearby road names and uses Nominatim reverse as a fallback.
+    </div>
+  </div>
+
+<script>
+  const el = (id) => document.getElementById(id);
+  const btnRefresh = el("refresh");
+  const btnCopy = el("copy");
+
+  let lastPayload = {
+    cross: "",
+    street: "",
+    coords: "",
+    acc: ""
+  };
+
+  function setStatus(t) { el("status").textContent = t; }
+  function setCross(t) { el("cross").textContent = t || "—"; }
+  function setStreet(t) { el("street").textContent = t || "—"; }
+  function setCoords(t) { el("coords").textContent = t || "—"; }
+  function setAcc(t) { el("acc").textContent = t || "—"; }
+
+  function fmt(n, digits=6) { return Number(n).toFixed(digits); }
+
+  function toRad(d) { return d * Math.PI / 180; }
+  function haversineMeters(aLat,aLon,bLat,bLon) {
+    const R = 6371000;
+    const dLat = toRad(bLat-aLat);
+    const dLon = toRad(bLon-aLon);
+    const s1 = Math.sin(dLat/2), s2 = Math.sin(dLon/2);
+    const x = s1*s1 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*s2*s2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  }
+
+  function bestTwoRoadNames(ways, lat, lon) {
+    const candidates = [];
+    for (const w of ways) {
+      const name = w.tags?.name?.trim();
+      if (!name) continue;
+      if (!w.center) continue;
+      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
+      candidates.push({ name, d });
+    }
+    candidates.sort((a,b) => a.d - b.d);
+
+    const first = candidates[0]?.name;
+    if (!first) return [];
+
+    let second = null;
+    for (const c of candidates) {
+      if (c.name !== first) { second = c.name; break; }
+    }
+    if (!second) return [first];
+    return [first, second];
+  }
+
+  async function overpassNearbyRoads(lat, lon) {
+    const endpoint = "https://overpass-api.de/api/interpreter";
+    const radius = 90; // bigger radius helps intersections
+    const query = `
+      [out:json][timeout:15];
+      (
+        way(around:${radius},${lat},${lon})["highway"]["name"];
+      );
+      out center tags;
+    `;
+
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+      body: "data=" + encodeURIComponent(query)
+    });
+
+    if (!resp.ok) throw new Error("Overpass error " + resp.status);
+    const data = await resp.json();
+    return (data.elements || []).filter(e => e.type === "way");
+  }
+
+  async function reverseNearestStreet(lat, lon) {
+    const url = new URL("https://nominatim.openstreetmap.org/reverse");
+    url.searchParams.set("format", "jsonv2");
+    url.searchParams.set("lat", lat);
+    url.searchParams.set("lon", lon);
+    url.searchParams.set("zoom", "18");
+    url.searchParams.set("addressdetails", "1");
+
+    const resp = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
+    if (!resp.ok) throw new Error("Nominatim error " + resp.status);
+    const j = await resp.json();
+    const a = j.address || {};
+
+    const road = a.road || a.pedestrian || a.footway || a.cycleway;
+    const city = a.city || a.town || a.village || a.hamlet || "";
+    const state = a.state || "";
+
+    const parts = [];
+    if (a.house_number && road) parts.push(a.house_number + " " + road);
+    else if (road) parts.push(road);
+    if (city) parts.push(city);
+    if (state) parts.push(state);
+
+    return parts.join(", ") || (j.display_name || "");
+  }
+
+  function haptic() {
+    try { navigator.vibrate(20); } catch (e) {}
+  }
+
+  async function run() {
+    btnRefresh.disabled = true;
+    btnCopy.disabled = true;
+
+    setStatus("Requesting location…");
+    setCross("Locating…");
+    setStreet("—");
+    setCoords("—");
+    setAcc("—");
+
+    const opts = { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 };
+
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const lat = pos.coords.latitude;
+        const lon = pos.coords.longitude;
+        const accuracyM = pos.coords.accuracy;
+
+        const coordsText = `${fmt(lat)}, ${fmt(lon)}`;
+        setCoords(coordsText);
+        setAcc(`${Math.round(accuracyM)} m`);
+
+        setStatus("Finding cross street…");
+        let crossText = "Not found";
+        let streetText = "";
+
+        try {
+          const ways = await overpassNearbyRoads(lat, lon);
+          const names = bestTwoRoadNames(ways, lat, lon);
+
+          if (names.length >= 2) crossText = `${names[0]} & ${names[1]}`;
+          else if (names.length === 1) crossText = `${names[0]}`;
+        } catch (e) {
+          crossText = "Cross street unavailable";
+        }
+
+        setStatus("Finding nearest street…");
+        try {
+          streetText = await reverseNearestStreet(lat, lon);
+        } catch (e) {
+          streetText = "";
+        }
+
+        setCross(crossText);
+        setStreet(streetText || "Nearest street unavailable");
+
+        lastPayload = {
+          cross: crossText,
+          street: streetText || "Nearest street unavailable",
+          coords: coordsText,
+          acc: `${Math.round(accuracyM)} m`
+        };
+
+        btnCopy.disabled = false;
+        setStatus("Ready");
+        haptic();
+      } catch (e) {
+        setStatus("Error");
+        setCross("Error getting location");
+        setStreet(String(e?.message || e));
+      } finally {
+        btnRefresh.disabled = false;
+      }
+    }, (err) => {
+      setStatus("Permission off");
+      setCross("Location blocked");
+      setStreet("Settings > Privacy & Security > Location Services > Safari Websites, then allow.");
+      btnRefresh.disabled = false;
+    }, opts);
+  }
+
+  async function copyText() {
+    const text =
+      `Cross: ${lastPayload.cross}\n` +
+      `Nearest: ${lastPayload.street}\n` +
+      `Coords: ${lastPayload.coords}\n` +
+      `Acc: ${lastPayload.acc}`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus("Copied");
+      haptic();
+      setTimeout(() => setStatus("Ready"), 900);
+    } catch (e) {
+      // Fallback for some iOS cases
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setStatus("Copied");
+      haptic();
+      setTimeout(() => setStatus("Ready"), 900);
+    }
+  }
+
+  btnRefresh.addEventListener("click", run);
+  btnCopy.addEventListener("click", copyText);
+
+  // Auto run on open
+  window.addEventListener("load", () => {
+    run();
+  });
+</script>
+</body>
+</html>
