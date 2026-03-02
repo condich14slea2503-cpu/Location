@@ -6,381 +6,196 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Cross Street</title>
-  <style>
-    :root { color-scheme: dark light; }
-    body { margin:0; font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
-    .wrap { padding: 16px; max-width: 860px; margin: 0 auto; }
-    .top { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom: 12px; }
-    h1 { margin:0; font-size: 18px; opacity: 0.9; letter-spacing: 0.2px; }
-    .status { font-size: 13px; opacity: 0.75; text-align:right; }
 
-    .card {
-      border-radius: 18px;
-      padding: 16px;
-      background: rgba(127,127,127,0.14);
-      border: 1px solid rgba(127,127,127,0.20);
+  <style>
+    body {
+      margin:0;
+      font-family: -apple-system, system-ui;
+      background:#000;
+      color:#fff;
     }
 
-    .sectionLabel {
-      font-size: 12px;
-      letter-spacing: 1.2px;
-      font-weight: 800;
-      opacity: 0.65;
-      margin: 0 0 6px 0;
+    .wrap { padding:16px; }
+
+    .label {
+      font-size:12px;
+      opacity:0.6;
+      font-weight:800;
+      margin-top:10px;
     }
 
     .cross {
-      font-size: 44px;
-      line-height: 1.05;
-      font-weight: 950;
-      letter-spacing: 0.2px;
-      word-break: break-word;
-      margin: 0 0 14px 0;
-      white-space: pre-line;
+      font-size:42px;
+      font-weight:900;
+      line-height:1.05;
+      white-space:pre-line;
     }
 
     .street {
-      font-size: 22px;
-      line-height: 1.15;
-      font-weight: 800;
-      opacity: 0.95;
-      margin: 0 0 14px 0;
-      word-break: break-word;
-      white-space: pre-line;
+      font-size:24px;
+      font-weight:800;
+      margin-top:6px;
     }
 
     .speed {
-      font-size: 30px;
-      line-height: 1.1;
-      font-weight: 950;
-      opacity: 0.98;
-      margin: 0 0 12px 0;
+      font-size:28px;
+      font-weight:900;
+      margin-top:10px;
     }
 
-    .meta {
-      display:flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      opacity: 0.75;
-      font-size: 13px;
-      margin-top: 6px;
-    }
-
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
-
-    .pill {
-      display:inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(127,127,127,0.18);
-      font-weight: 750;
-    }
-
-    .btnrow { display:flex; gap: 10px; margin-top: 12px; }
     button {
-      flex: 1;
-      padding: 14px 14px;
-      border-radius: 16px;
-      border: 0;
-      font-size: 16px;
-      font-weight: 900;
-      background: #0A84FF;
-      color: white;
-    }
-    button.secondary { background: rgba(127,127,127,0.25); color: white; }
-    button:active { transform: scale(0.99); }
-    button:disabled { opacity: 0.6; }
-
-    .footer {
-      margin-top: 12px;
-      font-size: 12px;
-      opacity: 0.7;
-      line-height: 1.35;
+      width:100%;
+      padding:14px;
+      margin-top:14px;
+      font-size:16px;
+      font-weight:900;
+      border-radius:12px;
+      border:0;
+      background:#0A84FF;
+      color:#fff;
     }
   </style>
 </head>
+
 <body>
-  <div class="wrap">
-    <div class="top">
-      <h1>Nearest Cross Street</h1>
-      <div class="status" id="status">Opening…</div>
-    </div>
+<div class="wrap">
 
-    <div class="card" role="status" aria-live="polite">
-      <div class="sectionLabel">CROSS STREET</div>
-      <div class="cross" id="cross">Locating…</div>
+  <div class="label">CROSS STREET</div>
+  <div class="cross" id="cross">Locating…</div>
 
-      <div class="sectionLabel">STREET</div>
-      <div class="street" id="street">—</div>
+  <div class="label">STREET</div>
+  <div class="street" id="street">—</div>
 
-      <div class="sectionLabel">SPEED LIMIT</div>
-      <div class="speed" id="speed">Unknown</div>
+  <div class="label">SPEED LIMIT</div>
+  <div class="speed" id="speed">—</div>
 
-      <div class="meta">
-        <span class="pill">Coords</span>
-        <span class="mono" id="coords">—</span>
-        <span class="pill">Accuracy</span>
-        <span class="mono" id="acc">—</span>
-      </div>
+  <button onclick="run()">Refresh</button>
 
-      <div class="btnrow">
-        <button id="refresh">Refresh</button>
-        <button class="secondary" id="copy">Copy</button>
-      </div>
-    </div>
-
-    <div class="footer">
-      Data: © OpenStreetMap contributors (ODbL). Cross streets and speed limits depend on map tagging in your area.
-    </div>
-  </div>
+</div>
 
 <script>
-  const el = (id) => document.getElementById(id);
-  const btnRefresh = el("refresh");
-  const btnCopy = el("copy");
 
-  // Tune this:
-  const radius = 200; // meters. 200 is a good balance for iPhone GPS.
+const radius = 250;
+const maxMainDist = 35;   // VERY tight
+const maxCrossDist = 160; // looser
 
-  let lastPayload = {
-    cross: "",
-    street: "",
-    speed: "",
-    coords: "",
-    acc: ""
-  };
+function toRad(d){ return d*Math.PI/180 }
 
-  function setStatus(t) { el("status").textContent = t; }
-  function setCross(t) { el("cross").textContent = t || "—"; }
-  function setStreet(t) { el("street").textContent = t || "—"; }
-  function setSpeed(t) { el("speed").textContent = t || "Unknown"; }
-  function setCoords(t) { el("coords").textContent = t || "—"; }
-  function setAcc(t) { el("acc").textContent = t || "—"; }
+function dist(aLat,aLon,bLat,bLon){
+  const R=6371000;
+  const dLat=toRad(bLat-aLat);
+  const dLon=toRad(bLon-aLon);
+  const x=Math.sin(dLat/2)**2+
+  Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(x));
+}
 
-  function fmt(n, digits=6) { return Number(n).toFixed(digits); }
-  function toRad(d) { return d * Math.PI / 180; }
+function parseSpeed(v){
+  if(!v) return null;
+  const n = String(v).match(/\d+/);
+  return n ? n[0] : null;
+}
 
-  function haversineMeters(aLat,aLon,bLat,bLon) {
-    const R = 6371000;
-    const dLat = toRad(bLat-aLat);
-    const dLon = toRad(bLon-aLon);
-    const s1 = Math.sin(dLat/2), s2 = Math.sin(dLon/2);
-    const x = s1*s1 + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*s2*s2;
-    return 2 * R * Math.asin(Math.sqrt(x));
+function getMainStreet(ways,lat,lon){
+  let best=null;
+
+  for(const w of ways){
+    const name=w.tags?.name;
+    if(!name||!w.center) continue;
+
+    const d=dist(lat,lon,w.center.lat,w.center.lon);
+
+    if(d>maxMainDist) continue;
+
+    if(!best||d<best.d) best={name,d};
   }
 
-  function haptic() {
-    try { navigator.vibrate(20); } catch (e) {}
+  return best?.name||"";
+}
+
+function getCross(ways,lat,lon){
+  const list=[];
+
+  for(const w of ways){
+    const name=w.tags?.name;
+    if(!name||!w.center) continue;
+
+    const d=dist(lat,lon,w.center.lat,w.center.lon);
+
+    if(d>maxCrossDist) continue;
+
+    list.push({name,d});
   }
 
-  function formatIntersection(a, b) {
-    // Display as:
-    // A
-    // & B
-    return `${a}\n& ${b}`;
+  list.sort((a,b)=>a.d-b.d);
+
+  const a=list[0]?.name;
+  if(!a) return "Not found";
+
+  let b=null;
+  for(const i of list){
+    if(i.name!==a){ b=i.name; break; }
   }
 
-  function parseMaxspeed(value) {
-    if (!value) return null;
-    const v = String(value);
+  if(!b) return a;
 
-    // Common patterns: "35", "35 mph", "55;65"
-    const nums = v.match(/\d+/g);
-    if (nums && nums.length) return Number(nums[0]);
+  return `${a}\n& ${b}`;
+}
 
-    return null; // we do not guess for coded values like US:IL:urban
+function getSpeed(ways,lat,lon){
+  let best=null;
+
+  for(const w of ways){
+    if(!w.center) continue;
+
+    const s=parseSpeed(w.tags?.maxspeed);
+    if(!s) continue;
+
+    const d=dist(lat,lon,w.center.lat,w.center.lon);
+
+    if(!best||d<best.d) best={s,d};
   }
 
-  function pickTwoClosestDistinctNames(ways, lat, lon) {
-    const candidates = [];
-    for (const w of ways) {
-      const name = w.tags?.name?.trim();
-      if (!name) continue;
-      if (!w.center) continue;
-      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
-      candidates.push({ name, d });
-    }
-    candidates.sort((a,b) => a.d - b.d);
+  return best?.s?`${best.s} MPH`:"Unknown";
+}
 
-    const first = candidates[0]?.name;
-    if (!first) return [];
+async function run(){
 
-    let second = null;
-    for (const c of candidates) {
-      if (c.name !== first) { second = c.name; break; }
-    }
-    if (!second) return [first];
-    return [first, second];
-  }
+  document.getElementById("cross").innerText="Locating…";
 
-  function pickNearestStreetName(ways, lat, lon) {
-    let best = null;
-    for (const w of ways) {
-      const name = w.tags?.name?.trim();
-      if (!name) continue;
-      if (!w.center) continue;
-      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
-      if (!best || d < best.d) best = { name, d };
-    }
-    return best?.name || "";
-  }
+  navigator.geolocation.getCurrentPosition(async pos=>{
 
-  function pickNearestMaxspeed(ways, lat, lon) {
-    let best = null;
-    for (const w of ways) {
-      if (!w.center) continue;
-      const ms = parseMaxspeed(w.tags?.maxspeed);
-      if (ms == null) continue;
-      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
-      if (!best || d < best.d) best = { maxspeed: ms, d, name: w.tags?.name || "" };
-    }
-    return best?.maxspeed ?? null;
-  }
+    const lat=pos.coords.latitude;
+    const lon=pos.coords.longitude;
 
-  async function overpassNearbyRoads(lat, lon) {
-    const endpoint = "https://overpass-api.de/api/interpreter";
-
-    // Pull nearby roads with highway tag; bring back tags and a center point.
-    // Name and maxspeed may or may not exist per road.
-    const query = `
-      [out:json][timeout:15];
-      way(around:${radius},${lat},${lon})["highway"];
-      out center tags;
+    const query=`
+    [out:json];
+    way(around:${radius},${lat},${lon})["highway"];
+    out center tags;
     `;
 
-    const resp = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-      body: "data=" + encodeURIComponent(query)
+    const res=await fetch("https://overpass-api.de/api/interpreter",{
+      method:"POST",
+      body:"data="+encodeURIComponent(query)
     });
 
-    if (!resp.ok) throw new Error("Overpass error " + resp.status);
-    const data = await resp.json();
-    return (data.elements || []).filter(e => e.type === "way");
-  }
+    const data=await res.json();
+    const ways=data.elements;
 
-  async function nominatimNearestStreet(lat, lon) {
-    // Fallback: readable nearest road/address (sometimes gives road even if no house number)
-    const url = new URL("https://nominatim.openstreetmap.org/reverse");
-    url.searchParams.set("format", "jsonv2");
-    url.searchParams.set("lat", lat);
-    url.searchParams.set("lon", lon);
-    url.searchParams.set("zoom", "18");
-    url.searchParams.set("addressdetails", "1");
+    const cross=getCross(ways,lat,lon);
+    const street=getMainStreet(ways,lat,lon);
+    const speed=getSpeed(ways,lat,lon);
 
-    const resp = await fetch(url.toString(), { headers: { "Accept": "application/json" } });
-    if (!resp.ok) throw new Error("Nominatim error " + resp.status);
-    const j = await resp.json();
-    const a = j.address || {};
-    const road = a.road || a.pedestrian || a.footway || a.cycleway || "";
-    return road || "";
-  }
+    document.getElementById("cross").innerText=cross;
+    document.getElementById("street").innerText=street||"Unknown";
+    document.getElementById("speed").innerText=speed;
 
-  async function run() {
-    btnRefresh.disabled = true;
-    btnCopy.disabled = true;
+  });
 
-    setStatus("Requesting location…");
-    setCross("Locating…");
-    setStreet("—");
-    setSpeed("Unknown");
-    setCoords("—");
-    setAcc("—");
+}
 
-    const opts = { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 };
+run();
 
-    navigator.geolocation.getCurrentPosition(async (pos) => {
-      try {
-        const lat = pos.coords.latitude;
-        const lon = pos.coords.longitude;
-        const accuracyM = pos.coords.accuracy;
-
-        const coordsText = `${fmt(lat)}, ${fmt(lon)}`;
-        setCoords(coordsText);
-        setAcc(`${Math.round(accuracyM)} m`);
-
-        setStatus("Finding nearby roads…");
-        const ways = await overpassNearbyRoads(lat, lon);
-
-        // CROSS STREET
-        let crossText = "Not found";
-        const names = pickTwoClosestDistinctNames(ways, lat, lon);
-        if (names.length >= 2) crossText = formatIntersection(names[0], names[1]);
-        else if (names.length === 1) crossText = names[0];
-        setCross(crossText);
-
-        // STREET (prefer nearest named road; fallback to Nominatim road)
-        let streetText = pickNearestStreetName(ways, lat, lon);
-        if (!streetText) {
-          setStatus("Finding street name…");
-          try { streetText = await nominatimNearestStreet(lat, lon); } catch (e) {}
-        }
-        setStreet(streetText || "Nearest street unavailable");
-
-        // SPEED LIMIT
-        const ms = pickNearestMaxspeed(ways, lat, lon);
-        setSpeed(ms != null ? `${ms} MPH` : "Unknown");
-
-        lastPayload = {
-          cross: crossText.replace(/\n/g, " "),
-          street: streetText || "Nearest street unavailable",
-          speed: ms != null ? `${ms} MPH` : "Unknown",
-          coords: coordsText,
-          acc: `${Math.round(accuracyM)} m`
-        };
-
-        btnCopy.disabled = false;
-        setStatus("Ready");
-        haptic();
-      } catch (e) {
-        setStatus("Error");
-        setCross("Error getting cross street");
-        setStreet(String(e?.message || e));
-        setSpeed("Unknown");
-      } finally {
-        btnRefresh.disabled = false;
-      }
-    }, (err) => {
-      setStatus("Permission off");
-      setCross("Location blocked");
-      setStreet("Enable location for Safari on iPhone settings");
-      setSpeed("Unknown");
-      btnRefresh.disabled = false;
-    }, opts);
-  }
-
-  async function copyText() {
-    const text =
-      `CROSS: ${lastPayload.cross}\n` +
-      `STREET: ${lastPayload.street}\n` +
-      `SPEED: ${lastPayload.speed}\n` +
-      `COORDS: ${lastPayload.coords}\n` +
-      `ACC: ${lastPayload.acc}`;
-
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("Copied");
-      haptic();
-      setTimeout(() => setStatus("Ready"), 900);
-    } catch (e) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      setStatus("Copied");
-      haptic();
-      setTimeout(() => setStatus("Ready"), 900);
-    }
-  }
-
-  btnRefresh.addEventListener("click", run);
-  btnCopy.addEventListener("click", copyText);
-
-  // Auto run on open
-  window.addEventListener("load", run);
 </script>
 </body>
 </html>
