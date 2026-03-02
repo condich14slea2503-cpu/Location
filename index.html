@@ -14,29 +14,47 @@
     h1 { margin:0; font-size: 18px; opacity: 0.9; letter-spacing: 0.2px; }
     .status { font-size: 13px; opacity: 0.75; text-align:right; }
 
-    .big {
+    .card {
       border-radius: 18px;
       padding: 16px;
       background: rgba(127,127,127,0.14);
       border: 1px solid rgba(127,127,127,0.20);
     }
 
+    .sectionLabel {
+      font-size: 12px;
+      letter-spacing: 1.2px;
+      font-weight: 800;
+      opacity: 0.65;
+      margin: 0 0 6px 0;
+    }
+
     .cross {
       font-size: 44px;
       line-height: 1.05;
-      font-weight: 900;
+      font-weight: 950;
       letter-spacing: 0.2px;
       word-break: break-word;
-      margin: 0 0 10px 0;
+      margin: 0 0 14px 0;
+      white-space: pre-line;
     }
 
     .street {
-      font-size: 18px;
-      line-height: 1.25;
-      font-weight: 650;
-      opacity: 0.9;
-      margin: 0 0 10px 0;
+      font-size: 22px;
+      line-height: 1.15;
+      font-weight: 800;
+      opacity: 0.95;
+      margin: 0 0 14px 0;
       word-break: break-word;
+      white-space: pre-line;
+    }
+
+    .speed {
+      font-size: 30px;
+      line-height: 1.1;
+      font-weight: 950;
+      opacity: 0.98;
+      margin: 0 0 12px 0;
     }
 
     .meta {
@@ -46,9 +64,18 @@
       align-items: center;
       opacity: 0.75;
       font-size: 13px;
+      margin-top: 6px;
     }
 
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .pill {
+      display:inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(127,127,127,0.18);
+      font-weight: 750;
+    }
 
     .btnrow { display:flex; gap: 10px; margin-top: 12px; }
     button {
@@ -57,7 +84,7 @@
       border-radius: 16px;
       border: 0;
       font-size: 16px;
-      font-weight: 850;
+      font-weight: 900;
       background: #0A84FF;
       color: white;
     }
@@ -71,13 +98,6 @@
       opacity: 0.7;
       line-height: 1.35;
     }
-
-    .pill {
-      display:inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(127,127,127,0.18);
-    }
   </style>
 </head>
 <body>
@@ -87,9 +107,15 @@
       <div class="status" id="status">Opening…</div>
     </div>
 
-    <div class="big" role="status" aria-live="polite">
+    <div class="card" role="status" aria-live="polite">
+      <div class="sectionLabel">CROSS STREET</div>
       <div class="cross" id="cross">Locating…</div>
+
+      <div class="sectionLabel">STREET</div>
       <div class="street" id="street">—</div>
+
+      <div class="sectionLabel">SPEED LIMIT</div>
+      <div class="speed" id="speed">Unknown</div>
 
       <div class="meta">
         <span class="pill">Coords</span>
@@ -105,8 +131,7 @@
     </div>
 
     <div class="footer">
-      <span class="pill">Data</span>
-      © OpenStreetMap contributors (ODbL). Queries Overpass API for nearby road names and uses Nominatim reverse as a fallback.
+      Data: © OpenStreetMap contributors (ODbL). Cross streets and speed limits depend on map tagging in your area.
     </div>
   </div>
 
@@ -115,9 +140,13 @@
   const btnRefresh = el("refresh");
   const btnCopy = el("copy");
 
+  // Tune this:
+  const radius = 200; // meters. 200 is a good balance for iPhone GPS.
+
   let lastPayload = {
     cross: "",
     street: "",
+    speed: "",
     coords: "",
     acc: ""
   };
@@ -125,12 +154,13 @@
   function setStatus(t) { el("status").textContent = t; }
   function setCross(t) { el("cross").textContent = t || "—"; }
   function setStreet(t) { el("street").textContent = t || "—"; }
+  function setSpeed(t) { el("speed").textContent = t || "Unknown"; }
   function setCoords(t) { el("coords").textContent = t || "—"; }
   function setAcc(t) { el("acc").textContent = t || "—"; }
 
   function fmt(n, digits=6) { return Number(n).toFixed(digits); }
-
   function toRad(d) { return d * Math.PI / 180; }
+
   function haversineMeters(aLat,aLon,bLat,bLon) {
     const R = 6371000;
     const dLat = toRad(bLat-aLat);
@@ -140,7 +170,29 @@
     return 2 * R * Math.asin(Math.sqrt(x));
   }
 
-  function bestTwoRoadNames(ways, lat, lon) {
+  function haptic() {
+    try { navigator.vibrate(20); } catch (e) {}
+  }
+
+  function formatIntersection(a, b) {
+    // Display as:
+    // A
+    // & B
+    return `${a}\n& ${b}`;
+  }
+
+  function parseMaxspeed(value) {
+    if (!value) return null;
+    const v = String(value);
+
+    // Common patterns: "35", "35 mph", "55;65"
+    const nums = v.match(/\d+/g);
+    if (nums && nums.length) return Number(nums[0]);
+
+    return null; // we do not guess for coded values like US:IL:urban
+  }
+
+  function pickTwoClosestDistinctNames(ways, lat, lon) {
     const candidates = [];
     for (const w of ways) {
       const name = w.tags?.name?.trim();
@@ -162,14 +214,38 @@
     return [first, second];
   }
 
+  function pickNearestStreetName(ways, lat, lon) {
+    let best = null;
+    for (const w of ways) {
+      const name = w.tags?.name?.trim();
+      if (!name) continue;
+      if (!w.center) continue;
+      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
+      if (!best || d < best.d) best = { name, d };
+    }
+    return best?.name || "";
+  }
+
+  function pickNearestMaxspeed(ways, lat, lon) {
+    let best = null;
+    for (const w of ways) {
+      if (!w.center) continue;
+      const ms = parseMaxspeed(w.tags?.maxspeed);
+      if (ms == null) continue;
+      const d = haversineMeters(lat, lon, w.center.lat, w.center.lon);
+      if (!best || d < best.d) best = { maxspeed: ms, d, name: w.tags?.name || "" };
+    }
+    return best?.maxspeed ?? null;
+  }
+
   async function overpassNearbyRoads(lat, lon) {
     const endpoint = "https://overpass-api.de/api/interpreter";
-    const radius = 90; // bigger radius helps intersections
+
+    // Pull nearby roads with highway tag; bring back tags and a center point.
+    // Name and maxspeed may or may not exist per road.
     const query = `
       [out:json][timeout:15];
-      (
-        way(around:${radius},${lat},${lon})["highway"]["name"];
-      );
+      way(around:${radius},${lat},${lon})["highway"];
       out center tags;
     `;
 
@@ -184,7 +260,8 @@
     return (data.elements || []).filter(e => e.type === "way");
   }
 
-  async function reverseNearestStreet(lat, lon) {
+  async function nominatimNearestStreet(lat, lon) {
+    // Fallback: readable nearest road/address (sometimes gives road even if no house number)
     const url = new URL("https://nominatim.openstreetmap.org/reverse");
     url.searchParams.set("format", "jsonv2");
     url.searchParams.set("lat", lat);
@@ -196,22 +273,8 @@
     if (!resp.ok) throw new Error("Nominatim error " + resp.status);
     const j = await resp.json();
     const a = j.address || {};
-
-    const road = a.road || a.pedestrian || a.footway || a.cycleway;
-    const city = a.city || a.town || a.village || a.hamlet || "";
-    const state = a.state || "";
-
-    const parts = [];
-    if (a.house_number && road) parts.push(a.house_number + " " + road);
-    else if (road) parts.push(road);
-    if (city) parts.push(city);
-    if (state) parts.push(state);
-
-    return parts.join(", ") || (j.display_name || "");
-  }
-
-  function haptic() {
-    try { navigator.vibrate(20); } catch (e) {}
+    const road = a.road || a.pedestrian || a.footway || a.cycleway || "";
+    return road || "";
   }
 
   async function run() {
@@ -221,6 +284,7 @@
     setStatus("Requesting location…");
     setCross("Locating…");
     setStreet("—");
+    setSpeed("Unknown");
     setCoords("—");
     setAcc("—");
 
@@ -236,33 +300,32 @@
         setCoords(coordsText);
         setAcc(`${Math.round(accuracyM)} m`);
 
-        setStatus("Finding cross street…");
+        setStatus("Finding nearby roads…");
+        const ways = await overpassNearbyRoads(lat, lon);
+
+        // CROSS STREET
         let crossText = "Not found";
-        let streetText = "";
-
-        try {
-          const ways = await overpassNearbyRoads(lat, lon);
-          const names = bestTwoRoadNames(ways, lat, lon);
-
-          if (names.length >= 2) crossText = `${names[0]} & ${names[1]}`;
-          else if (names.length === 1) crossText = `${names[0]}`;
-        } catch (e) {
-          crossText = "Cross street unavailable";
-        }
-
-        setStatus("Finding nearest street…");
-        try {
-          streetText = await reverseNearestStreet(lat, lon);
-        } catch (e) {
-          streetText = "";
-        }
-
+        const names = pickTwoClosestDistinctNames(ways, lat, lon);
+        if (names.length >= 2) crossText = formatIntersection(names[0], names[1]);
+        else if (names.length === 1) crossText = names[0];
         setCross(crossText);
+
+        // STREET (prefer nearest named road; fallback to Nominatim road)
+        let streetText = pickNearestStreetName(ways, lat, lon);
+        if (!streetText) {
+          setStatus("Finding street name…");
+          try { streetText = await nominatimNearestStreet(lat, lon); } catch (e) {}
+        }
         setStreet(streetText || "Nearest street unavailable");
 
+        // SPEED LIMIT
+        const ms = pickNearestMaxspeed(ways, lat, lon);
+        setSpeed(ms != null ? `${ms} MPH` : "Unknown");
+
         lastPayload = {
-          cross: crossText,
+          cross: crossText.replace(/\n/g, " "),
           street: streetText || "Nearest street unavailable",
+          speed: ms != null ? `${ms} MPH` : "Unknown",
           coords: coordsText,
           acc: `${Math.round(accuracyM)} m`
         };
@@ -272,25 +335,28 @@
         haptic();
       } catch (e) {
         setStatus("Error");
-        setCross("Error getting location");
+        setCross("Error getting cross street");
         setStreet(String(e?.message || e));
+        setSpeed("Unknown");
       } finally {
         btnRefresh.disabled = false;
       }
     }, (err) => {
       setStatus("Permission off");
       setCross("Location blocked");
-      setStreet("Settings > Privacy & Security > Location Services > Safari Websites, then allow.");
+      setStreet("Enable location for Safari on iPhone settings");
+      setSpeed("Unknown");
       btnRefresh.disabled = false;
     }, opts);
   }
 
   async function copyText() {
     const text =
-      `Cross: ${lastPayload.cross}\n` +
-      `Nearest: ${lastPayload.street}\n` +
-      `Coords: ${lastPayload.coords}\n` +
-      `Acc: ${lastPayload.acc}`;
+      `CROSS: ${lastPayload.cross}\n` +
+      `STREET: ${lastPayload.street}\n` +
+      `SPEED: ${lastPayload.speed}\n` +
+      `COORDS: ${lastPayload.coords}\n` +
+      `ACC: ${lastPayload.acc}`;
 
     try {
       await navigator.clipboard.writeText(text);
@@ -298,7 +364,6 @@
       haptic();
       setTimeout(() => setStatus("Ready"), 900);
     } catch (e) {
-      // Fallback for some iOS cases
       const ta = document.createElement("textarea");
       ta.value = text;
       document.body.appendChild(ta);
@@ -315,9 +380,7 @@
   btnCopy.addEventListener("click", copyText);
 
   // Auto run on open
-  window.addEventListener("load", () => {
-    run();
-  });
+  window.addEventListener("load", run);
 </script>
 </body>
 </html>
