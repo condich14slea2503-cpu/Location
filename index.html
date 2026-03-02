@@ -12,13 +12,55 @@
     body { margin:0; font-family: -apple-system, system-ui; background:#000; color:#fff; }
     .wrap { padding:16px; max-width: 860px; margin: 0 auto; }
 
-    .label { font-size:12px; letter-spacing: 1.2px; opacity:0.65; font-weight:900; margin-top:12px; }
-    .cross { font-size:42px; font-weight:950; line-height:1.05; white-space:pre-line; margin-top:6px; }
-    .street { font-size:24px; font-weight:850; margin-top:6px; opacity:0.95; white-space:pre-line; }
-    .speed { font-size:28px; font-weight:950; margin-top:6px; opacity:0.98; }
+    .label {
+      font-size:12px;
+      letter-spacing: 1.2px;
+      opacity:0.65;
+      font-weight:900;
+      margin-top:12px;
+    }
 
-    .meta { margin-top: 12px; font-size: 13px; opacity: 0.75; display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
-    .pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background: rgba(127,127,127,0.18); font-weight: 850; }
+    .cross {
+      font-size:42px;
+      font-weight:950;
+      line-height:1.05;
+      white-space:pre-line;
+      margin-top:6px;
+    }
+
+    .street {
+      font-size:24px;
+      font-weight:850;
+      margin-top:6px;
+      opacity:0.95;
+      white-space:pre-line;
+    }
+
+    .speed {
+      font-size:28px;
+      font-weight:950;
+      margin-top:6px;
+      opacity:0.98;
+    }
+
+    .meta {
+      margin-top: 12px;
+      font-size: 13px;
+      opacity: 0.75;
+      display:flex;
+      gap:10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .pill {
+      display:inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(127,127,127,0.18);
+      font-weight: 850;
+    }
+
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
 
     .btnrow { display:flex; gap: 10px; margin-top: 14px; }
@@ -66,9 +108,9 @@
   // Overall search radius for roads
   const radius = 250;
 
-  // Your requested behavior
-  const maxMainDist  = 35;   // VERY tight: main street must be extremely close
-  const maxCrossDist = 180;  // looser: cross street can be farther out
+  // Requested behavior
+  const maxMainDist  = 45;   // tight main street, but more reliable than 35 near lots
+  const maxCrossDist = 180;  // cross street can be farther out
 
   const el = (id) => document.getElementById(id);
   const btnRefresh = el("refresh");
@@ -80,6 +122,7 @@
   function setStatus(txt) { setText("status", txt); }
 
   function toRad(d){ return d*Math.PI/180; }
+
   function haversineMeters(aLat,aLon,bLat,bLon){
     const R=6371000;
     const dLat=toRad(bLat-aLat);
@@ -90,10 +133,10 @@
   }
 
   // Distance from point to a way: approximate using the closest node in its geometry
-  // (Much better than using the way center for "main street".)
   function wayDistanceMeters(way, lat, lon) {
     const g = way.geometry;
     if (!g || !g.length) return Infinity;
+
     let best = Infinity;
     for (const p of g) {
       const d = haversineMeters(lat, lon, p.lat, p.lon);
@@ -115,6 +158,7 @@
 
   function getMainStreet(ways, lat, lon) {
     let best = null;
+
     for (const w of ways) {
       const name = w.tags?.name?.trim();
       if (!name) continue;
@@ -124,17 +168,24 @@
 
       if (!best || d < best.d) best = { name, d, way: w };
     }
+
     return best; // {name, d, way} or null
   }
 
-  function getCrossStreets(ways, lat, lon) {
+  // ✅ FIXED: cross street will not duplicate main street, but still allows tiny roads
+  function getCrossStreets(ways, lat, lon, mainStreetName) {
     const candidates = [];
+    const mainLower = (mainStreetName || "").trim().toLowerCase();
+
     for (const w of ways) {
       const name = w.tags?.name?.trim();
       if (!name) continue;
 
       const d = wayDistanceMeters(w, lat, lon);
       if (d > maxCrossDist) continue;
+
+      // Skip only if same as main street (case-insensitive)
+      if (mainLower && name.toLowerCase() === mainLower) continue;
 
       candidates.push({ name, d });
     }
@@ -150,6 +201,7 @@
     }
 
     if (!second) return { text: first, a: first, b: null };
+
     return { text: formatIntersection(first, second), a: first, b: second };
   }
 
@@ -160,6 +212,7 @@
 
   function getNearestAnySpeed(ways, lat, lon) {
     let best = null;
+
     for (const w of ways) {
       const ms = parseMaxspeed(w.tags?.maxspeed);
       if (ms == null) continue;
@@ -167,22 +220,26 @@
       const d = wayDistanceMeters(w, lat, lon);
       if (!best || d < best.d) best = { ms, d };
     }
+
     return best ? `${best.ms} MPH` : "Unknown";
   }
 
   async function overpassRoads(lat, lon) {
-    // Ask for geometry so we can measure distance to the actual road line.
+    // Ask for geometry so we can measure distance to the road line (not the center)
     const query = `
       [out:json][timeout:15];
       way(around:${radius},${lat},${lon})["highway"];
       out tags geom;
     `;
+
     const resp = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
       body: "data=" + encodeURIComponent(query)
     });
+
     if (!resp.ok) throw new Error("Overpass error " + resp.status);
+
     const data = await resp.json();
     return (data.elements || []).filter(e => e.type === "way");
   }
@@ -212,16 +269,16 @@
         setStatus("Loading roads");
         const ways = await overpassRoads(lat, lon);
 
-        // MAIN STREET (tight)
+        // MAIN STREET
         const main = getMainStreet(ways, lat, lon);
         const mainStreetText = main?.name || "Unknown";
         setText("street", mainStreetText);
 
-        // CROSS STREET (looser)
-        const cross = getCrossStreets(ways, lat, lon);
+        // CROSS STREET (excluding main street)
+        const cross = getCrossStreets(ways, lat, lon, mainStreetText);
         setText("cross", cross.text);
 
-        // SPEED LIMIT: prefer main road's speed, otherwise nearest speed-tagged road
+        // SPEED LIMIT: prefer main road's speed, else nearest speed-tagged road
         let speedText = main ? (getSpeedFromWay(main.way) || null) : null;
         if (!speedText) speedText = getNearestAnySpeed(ways, lat, lon);
         setText("speed", speedText);
@@ -245,7 +302,7 @@
       } finally {
         btnRefresh.disabled = false;
       }
-    }, (err) => {
+    }, () => {
       setStatus("Location blocked");
       setText("cross", "Location blocked");
       setText("street", "Enable location for Safari / your home screen app");
